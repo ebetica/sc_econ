@@ -19,7 +19,7 @@ local DEBUG = args.debug
 local tc = require 'torchcraft'
 tc.DEBUG = DEBUG
 -- Enables a battle ended flag, for when one side loses all units
-tc.micro_battles = MICRO_MODE
+tc.micro_battles = true
 local utils = require 'torchcraft.utils'
 
 local function get_closest(position, unitsTable)
@@ -62,7 +62,7 @@ while total_battles < 40 do
 
   local built_barracks = 0
   local building_supply = false
-  local battle_ended = false
+  local resetting = false
 
   local nunits = nil
   local producing = false
@@ -76,14 +76,29 @@ while total_battles < 40 do
     local actions = {}
     if tc.state.game_ended then
       break
-    elseif battle_ended then
+    elseif tc.state.battle_just_ended then
       if DEBUG > 0 then
         print("BATTLE ENDED")
       end
       total_battles = total_battles + 1
       print("Scenario ended with resources: ")
       print(tc.state.resources_myself)
-      actions = {tc.command(tc.quit)}
+      resetting = false
+      built_barracks = 0
+      building_supply = false
+      nunits = nil
+      producing = false
+    elseif tc.state.waiting_for_restart then
+      -- a battle finished, waiting for the next one to start!
+      if DEBUG > 0 then
+        print("WAITING FOR RESTART")
+      end
+    elseif resetting then
+      for uid, ut in pairs(tc.state.units_myself) do
+        if ut.type == tc.unittypes.Zerg_Infested_Terran then
+          actions = {tc.command(tc.command_unit, uid, tc.cmd.Move, 0, 22, 33)}
+        end
+      end
     else
       if tc.state.resources_myself.used_psi ~= tc.state.resources_myself.total_psi then
         building_supply = false
@@ -99,7 +114,8 @@ while total_battles < 40 do
         for uid, ut in pairs(tc.state.units_myself) do
           if tc:isbuilding(ut.type) then -- produce scv only if not producing
             if ut.type == tc.unittypes.Terran_Command_Center
-              and not producing and tc.state.resources_myself.ore >= 50 then
+              and not producing and tc.state.resources_myself.ore >= 50
+              and tc.state.resources_myself.used_psi ~= tc.state.resources_myself.total_psi then
               table.insert(actions,
                 tc.command(tc.command_unit, uid, tc.cmd.Train, 0, 0, 0,
                   tc.unittypes.Terran_SCV))
@@ -124,18 +140,17 @@ while total_battles < 40 do
                   tc.cmd.Build, -1,
                   pos[1], pos[2] - 45, tc.unittypes.Terran_Barracks))
               end
-            elseif tc.state.resources_myself.ore >= 105 and
+            elseif tc.state.resources_myself.ore >= 100 and
               tc.state.resources_myself.used_psi >= tc.state.resources_myself.total_psi - 1
               and not building_supply then
                 local built_supply = 0
-                local building = false
                 local sups = tc:filter_type(tc.state.units_myself,
                                             {tc.unittypes.Terran_Supply_Depot})
                 for _, v in pairs(sups) do
                   built_supply = built_supply + 1
                 end
                 -- Reset on second supply
-                if built_supply == 2 then battle_ended = true end
+                if built_supply >= 1 then resetting = true end
                 local _, pos = next(tc:filter_type(
                   tc.state.units_myself,
                   {tc.unittypes.Terran_Command_Center}))
